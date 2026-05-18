@@ -1,15 +1,16 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import json
+import os
 
 app = Flask(__name__)
-# Production-ready configuration for local and cloud deployment
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///smart_review.db'
+
+# Render ya local dono ke liye database path automatic handle karne ke liye
+db_path = os.path.join(os.path.dirname(__file__), 'smart_review.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-with app.app_context():
-    db.create_all()
-    
+
 # 1. DATABASE MODELS
 class Product(db.Model):
     __tablename__ = 'mera_products'
@@ -26,11 +27,11 @@ class Review(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('mera_products.id'), nullable=False)
     review_text = db.Column(db.Text, nullable=False)
     rating = db.Column(db.Integer, nullable=False)
-    sentiment_label = db.Column(db.String(20), nullable=False) # Positive, Negative, Neutral
-    aspects = db.Column(db.Text, nullable=True) # JSON structure placeholder
+    sentiment_label = db.Column(db.String(20), nullable=False)
+    aspects = db.Column(db.Text, nullable=True)
 
-# Function to automatically insert initial standard products if DB is blank
-def seed_database():
+# Helper function jo database create bhi karega aur seed bhi karega
+def init_db_safely():
     db.create_all()
     if Product.query.count() == 0:
         p1 = Product(name="Wireless ANC Headphones", description="High-quality sound with hybrid active noise cancellation.", category="Electronics", image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500")
@@ -42,13 +43,14 @@ def seed_database():
 # 2. APPLICATION ROUTES
 @app.route('/')
 def homepage():
+    # Yeh line har baar check karegi ki database bana hai ya nahi, cloud par safe rehne ke liye
+    init_db_safely()
     products = Product.query.all()
     return render_template('index.html', products=products)
 
 @app.route('/product/<int:product_id>')
 def product_detail(product_id):
     product = Product.query.get_or_404(product_id)
-    # Aggregating counters for the analytical UI layers
     pos_count = Review.query.filter_by(product_id=product_id, sentiment_label='Positive').count()
     neg_count = Review.query.filter_by(product_id=product_id, sentiment_label='Negative').count()
     neu_count = Review.query.filter_by(product_id=product_id, sentiment_label='Neutral').count()
@@ -60,7 +62,6 @@ def add_review(product_id):
     text = request.form.get('review_text')
     rating = int(request.form.get('rating'))
     
-    # NLP Parser core pipeline logic
     lower_text = text.lower()
     if any(word in lower_text for word in ['bad', 'worst', 'bekar', 'waste', 'slow', 'ghatiya']):
         sentiment = 'Negative'
@@ -84,6 +85,4 @@ def add_review(product_id):
     return redirect(url_for('product_detail', product_id=product_id))
 
 if __name__ == '__main__':
-    with app.app_context():
-        seed_database()
     app.run(debug=True)
